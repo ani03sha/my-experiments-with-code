@@ -288,3 +288,114 @@ Compare to backoff+jitter:
 **That's the power of simple fixes.**
 
 **Bottom line**: Never "just add retries." Always bound, backoff, and budget. Retries are necessary but dangerous. Handle with care.
+
+## Autoscaling, Load Shedding, Graceful Degradation
+
+A reproducible local demo showing how autoscaling, load-shedding, and graceful degradation work together to maintain SLOs under bursty traffic.
+
+### Overview
+
+This demo simulates a production-like system experiencing sudden traffic bursts. It demonstrates three resilience patterns:
+
+1. **Autoscaling**: Automatically adds instances when latency degrades
+2. **Load Shedding**: Rejects requests when capacity is exceeded
+3. **Graceful Degradation**: Returns cached/simplified responses instead of errors
+
+### Architecture
+
+```plaintext
+wrk (load generator)
+  ↓
+Dispatcher (port 8080)
+  ↓ (round-robin)
+API Instances (ports 3000+)
+  ↓
+DB Simulator (port 3001) [optional]
+
+Autoscaler (monitors port 8080, controls scaling)
+```
+
+### Quick Start
+
+Run the combined demo (recommended):
+
+```bash
+./run_scale_then_shed.sh
+```
+
+This will:
+1. Start dispatcher with 1 instance
+2. Start autoscaler
+3. Apply burst load
+4. Show autoscaling reaction
+5. Demonstrate load shedding as safety net
+6. Generate metrics for analysis
+
+### Running Tests
+
+#### Test 1: Baseline Burst (No Protection)
+
+```bash
+./run_burst.sh
+```
+
+**Expected Outcome**: Single instance overwhelmed, high p99 latency, queue depth spikes.
+
+**What to capture**:
+```bash
+cat baseline_burst.txt | grep "Latency Distribution" -A 4
+# Copy: p50, p95, p99 values
+cat baseline_burst.txt | grep "Requests/sec"
+# Copy: throughput
+```
+
+#### Test 2: Load Shedding Only
+
+```bash
+./run_noscale_shed.sh
+```
+
+**Expected Outcome**: Some requests shed (503), but successful requests maintain SLO.
+
+**What to capture**:
+```bash
+cat after_noscale.json | jq '.api_instances[0] | {
+  shed_count: .api_shed_count,
+  p95: .p95_estimate,
+  queue: .api_queue
+}'
+```
+
+#### Test 3: Autoscaling + Load Shedding
+
+```bash
+./run_scale_then_shed.sh
+```
+
+**Expected Outcome**: Instance count increases, shed rate decreases, p95 recovers.
+
+**What to capture**:
+```bash
+# Before
+cat before_combined.json | jq '{instances: .dispatcher.dispatcher_active_instances, p95: .dispatcher.p95_estimate}'
+
+# After
+cat after_combined.json | jq '{instances: .dispatcher.dispatcher_active_instances, p95: .dispatcher.p95_estimate, total_shed: [.api_instances[].api_shed_count] | add}'
+
+# Scaling events
+cat after_combined.json | jq '.autoscaler.scale_history'
+```
+
+#### Test 4: Parameter Sweep
+
+```bash
+./sweep_scale.sh
+```
+
+Tests different combinations of:
+- Scale reaction time (fast: 3s, slow: 10s)
+- Shed threshold (low: 5, medium: 10, high: 15)
+
+**What to capture**:
+```bash
+cat sweep_results_*/summary.csv | column -t -s','
