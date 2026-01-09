@@ -399,3 +399,55 @@ Tests different combinations of:
 **What to capture**:
 ```bash
 cat sweep_results_*/summary.csv | column -t -s','
+```
+
+## Safe Schema Migration With Backfills
+
+Zero-downtime schema migration demo using the expand → backfill → contract pattern.
+
+### Prerequisites
+
+- Docker & Docker Compose
+- Node.js 18+
+- `jq` for JSON parsing
+
+### Setup
+
+```bash
+npm install
+docker-compose up -d
+```
+
+### Run Migration Phases
+
+Execute in order:
+
+```bash
+bash run_baseline.sh      # Initialize DB + baseline traffic (60s)
+bash run_expand.sh         # Add nullable column (30s)
+bash run_backfill.sh       # Backfill with live traffic (2 mins)
+bash run_contract.sh       # Drop old columns (30s)
+```
+
+### Validate
+
+```bash
+bash collect_validation.sh  # Check migration completeness
+```
+
+### Rollback Demo
+
+```bash
+bash run_rollback.sh       # Simulates failed backfill + recovery
+```
+
+### Key Files
+
+- `app_v1.js` - Original schema (first_name, last_name)
+- `app_v2.js` - New schema (full_name) with dual-write mode
+- `backfill.js` - Idempotent chunked backfill
+- `traffic_generator.js` - Concurrent load simulator
+
+### Expected Outcome
+
+All phases complete with zero errors. Final state: 100% users migrated to `full_name` column.
