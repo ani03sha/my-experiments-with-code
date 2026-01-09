@@ -49,11 +49,11 @@ async function v2Write() {
     }
 }
 
-async function readRandomUser() {
+async function readRandomUser(v2Ratio = 0.0) {
     try {
         // Pick random id between 1-100
         const id = Math.floor(Math.random() * 100) + 1;
-        const version = Math.random() > 0.5 ? 'v1' : 'v2';
+        const version = Math.random() < v2Ratio ? 'v2' : 'v1';
         const base = version === 'v1' ? V1_BASE : V2_BASE;
 
         const response = await axios.get(`${base}/user/${id}`);
@@ -96,7 +96,7 @@ async function runTraffic(durationMs = 60000, v2Ratio = 0.0) {
                 }
             }
         } else { // 60% reads
-            const result = await readRandomUser();
+            const result = await readRandomUser(v2Ratio);
             if (result.success) {
                 stats.reads.success++;
             }

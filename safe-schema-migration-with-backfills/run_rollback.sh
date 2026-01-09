@@ -32,6 +32,9 @@ done
 echo "Both apps are ready!"
 
 echo "=== Step 3: Simulate failed backfill (kill mid-way) ==="
+# Clean up any stale progress file from previous runs
+rm -f .backfill_progress
+
 node traffic_generator.js 300 0.3 &
 TRAFFIC_PID=$!
 

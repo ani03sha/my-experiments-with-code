@@ -34,6 +34,9 @@ echo "V2 stats:"
 curl -s http://localhost:3001/v2/stats | jq .
 
 echo "=== Step 3: Run backfill with live traffic (2 mins) ==="
+# Clean up any stale progress file from previous runs
+rm -f .backfill_progress
+
 node traffic_generator.js 120 0.2 &  # 20% traffic to V2
 TRAFFIC_PID=$!
 

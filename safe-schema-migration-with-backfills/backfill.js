@@ -34,7 +34,9 @@ async function backfillChunk(startId) {
             SELECT id, first_name, last_name, full_name
             FROM users
             WHERE id > $1
-                AND (full_name IS NULL OR first_name IS NOT NULL or last_name IS NOT NULL)
+                AND first_name IS NOT NULL
+                AND last_name IS NOT NULL
+                AND (full_name IS NULL OR full_name != TRIM(first_name || ' ' || last_name))
             ORDER BY id
             LIMIT $2
         `, [startId, CHUNK_SIZE]);

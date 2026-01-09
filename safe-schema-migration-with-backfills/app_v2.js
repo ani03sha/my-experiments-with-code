@@ -77,16 +77,41 @@ app.post('/v2/user', async (req, res) => {
 });
 
 app.get('/v2/stats', async (req, res) => {
-    const stats = await pool.query(`
-            SELECT 
-                COUNT(*) AS total_users,
-                COUNT(full_name) AS users_with_full_name,
-                COUNT(first_name) AS users_with_first_name,
-                COUNT(last_name) AS users_with_last_name,
-                SUM(CASE WHEN full_name IS NOT NULL AND first_name is NULL THEN 1 ELSE 0 END) AS v2_only_users
-            FROM users
+    try {
+        // Check if old columns still exist (before contraction)
+        const columnsCheck = await pool.query(`
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name IN ('first_name', 'last_name')
         `);
-    res.json(stats.rows[0]);
+
+        const hasOldColumns = columnsCheck.rows.length > 0;
+
+        let stats;
+        if (hasOldColumns) {
+            // Before contraction - show both old and new columns
+            stats = await pool.query(`
+                SELECT
+                    COUNT(*) AS total_users,
+                    COUNT(full_name) AS users_with_full_name,
+                    COUNT(first_name) AS users_with_first_name,
+                    COUNT(last_name) AS users_with_last_name,
+                    SUM(CASE WHEN full_name IS NOT NULL AND first_name is NULL THEN 1 ELSE 0 END) AS v2_only_users
+                FROM users
+            `);
+        } else {
+            // After contraction - only new column exists
+            stats = await pool.query(`
+                SELECT
+                    COUNT(*) AS total_users,
+                    COUNT(full_name) AS users_with_full_name
+                FROM users
+            `);
+        }
+        res.json(stats.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 const PORT = process.env.V2_PORT || 3001;
