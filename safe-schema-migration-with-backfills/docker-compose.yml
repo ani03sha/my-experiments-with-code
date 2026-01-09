@@ -1,0 +1,33 @@
+version: "3.8"
+
+services:
+    postgres:
+        image: postgres:15-alpine
+        container_name: migration_demo_db
+        environment:
+            POSTGRES_DB: migration_demo
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+        ports:
+            - "5432:5432"
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+            - ./db_init.sql:/docker-entrypoint-initdb.d/db_init.sql
+            - ./migrate_expand.sql:/docker-entrypoint-initdb.d/migrate_expand.sql
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U postgres -d migration_demo"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        networks:
+            - migration_network
+        restart: unless-stopped
+
+networks:
+    migration_network:
+        driver: bridge
+
+volumes:
+    postgres_data:
+        driver: local
