@@ -451,3 +451,57 @@ bash run_rollback.sh       # Simulates failed backfill + recovery
 ### Expected Outcome
 
 All phases complete with zero errors. Final state: 100% users migrated to `full_name` column.
+
+## Chaos Engineering with Automated Remediation Demo
+
+A compact, deterministic, reproducible demo that demonstrates chaos engineering experiments combined with automated remediation to protect SLOs.
+
+### Architecture
+
+```
+wrk -> dispatcher -> [ N x API instances ] -> db_sim
+           |                     ^
+           |---- remediator ---->|
+```
+
+- **Dispatcher**: Local load balancer that round-robins to active API instances and exposes metrics
+- **API Instances**: Handle work requests with configurable pool size, degrade mode, and chaos modes
+- **DB Simulator**: Simple fast DB simulator with low latency
+- **Chaos Controller**: Deterministic fault injector (latency, errors, instance kill)
+- **Remediator**: Polls metrics and executes remediation actions based on SLO rules
+
+### Quick Start
+```bash
+# Run baseline test (20 seconds)
+./run_baseline.sh
+
+# Run chaos experiments (60 seconds each)
+./run_chaos_latency.sh  # Inject latency on one instance
+./run_chaos_error.sh    # Inject error responses
+./run_chaos_kill.sh     # Kill an instance
+```
+
+### Run Scripts
+
+#### run_baseline.sh
+Starts 2 API instances, dispatcher, and DB simulator. Runs baseline load test:
+```bash
+wrk -t4 -c200 -d20s --latency http://localhost:8080/work
+```
+Output saved to `baseline.txt`.
+
+#### run_chaos_latency.sh
+Injects 200ms latency on instance-1 after 10 seconds for 20 seconds. Remediator monitors and may restart/scale. Runs:
+```bash
+wrk -t8 -c400 -d60s --latency http://localhost:8080/work
+```
+Output saved to `during_latency.txt`.
+
+#### run_chaos_error.sh
+Injects 50% error rate on instance-1 after 10 seconds for 20 seconds. Remediator may enable degrade mode. Same wrk command, output to `during_error.txt`.
+
+#### run_chaos_kill.sh
+Kills instance-1 after 10 seconds. Remediator detects and should restart. Same wrk command, output to `during_kill.txt`.
+
+#### collect_metrics.sh
+Samples `/metrics` endpoints every 5 seconds and stores snapshots to files.
