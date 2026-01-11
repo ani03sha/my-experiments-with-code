@@ -505,3 +505,144 @@ Kills instance-1 after 10 seconds. Remediator detects and should restart. Same w
 
 #### collect_metrics.sh
 Samples `/metrics` endpoints every 5 seconds and stores snapshots to files.
+
+## Cache Stampede Demo
+
+A compact, deterministic, reproducible demonstration of cache behavior under load, specifically showing:
+- Cache misses
+- Cache stampedes
+- Mitigation strategies (singleflight / request coalescing, negative caching)
+
+### Quickstart
+
+```bash
+npm install
+./run_all_tests.sh    # Runs all tests (~2-3 min)
+./analyze_results.sh  # View formatted comparison
+```
+
+That's it! You will see how caching can make systems **worse** under load, and how to fix it.
+
+### What This Demonstrates
+
+This project teaches three critical lessons about caching systems:
+
+1. **Naive caching can make systems worse under load** - When cache entries expire synchronously, all concurrent requests rush to the database, creating a stampede that overwhelms downstream systems.
+
+2. **Cache misses amplify downstream load and explode p99 latency** - A single cache miss under high concurrency can trigger hundreds of simultaneous database calls, causing tail latency to spike dramatically.
+
+3. **Proper mitigation patterns stabilize latency and protect downstreams** - Techniques like singleflight (request coalescing), TTL jitter, and negative caching prevent stampedes and keep systems stable even under extreme load.
+
+### Architecture
+
+```
+wrk (load generator)
+  ↓
+API Service (Express on port 3000)
+  ↓
+In-memory Cache (TTL-based)
+  ↓
+Downstream DB Simulator (port 3001, max 20 concurrent, 50ms latency)
+```
+
+The cache is inside the API process (simple in-memory Map with TTL).
+
+**DB Simulator Configuration:**
+- Concurrency limit: 20 simultaneous requests (controlled by semaphore)
+- Latency per request: 50ms
+- This creates realistic backpressure to demonstrate cache benefits
+
+### Cache Modes
+
+The API server supports four cache modes (via `CACHE` environment variable):
+
+- `off` - No caching, all requests go directly to DB
+- `naive` - Simple TTL-based cache, susceptible to stampedes
+- `singleflight` - Request coalescing: only one in-flight DB call per key
+- `negative` - Singleflight + negative caching for errors (short TTL)
+
+### Run All Tests Automatically
+
+The easiest way to see all demonstrations:
+
+```bash
+./run_all_tests.sh
+```
+
+This script:
+- Runs all 5 tests sequentially (no-cache, naive, stampede, singleflight, negative)
+- Collects and analyzes results automatically
+- Generates a comprehensive summary with:
+  - Performance comparison table
+  - Key findings and observations
+  - Production recommendations
+- Takes ~2-3 minutes total
+- Saves summary to `results/summary_TIMESTAMP.txt`
+
+**All test scripts automatically save their output to the `results/` directory with timestamps.**
+
+### Run Individual Tests
+
+Each script demonstrates a different caching behavior:
+
+#### 1. No Cache Baseline
+```bash
+./run_no_cache.sh
+```
+Expected: Stable but slow (p50: ~50-70ms, p99: ~100-150ms). All requests hit the database. Downstream load proportional to QPS.
+Note: Uses 100 concurrent connections to avoid overwhelming the uncached system.
+
+#### 2. Naive Cache
+```bash
+./run_naive_cache.sh
+```
+Expected: Good steady-state performance when cache is hot, but catastrophic p99 spike when TTL expires and cache entries synchronize.
+
+#### 3. Cache Stampede (Intentional)
+```bash
+./run_stampede.sh
+```
+Expected: Dramatic demonstration of stampede behavior. Sudden surge in `downstream_calls` and `db_queue`, p99 latency spikes.
+Duration: ~20 seconds (faster than before)
+
+#### 4. Singleflight Protection
+```bash
+./run_singleflight.sh
+```
+Expected: `downstream_calls` capped at ~1 per key despite high concurrency. P99 stabilizes even during TTL expiry.
+
+#### 5. Negative Caching
+```bash
+./run_negative_cache.sh
+```
+Expected: During error bursts, repeated failures don't amplify load. Short-TTL error caching prevents downstream from being hammered.
+
+### Analyzing Test Results
+
+#### Quick Comparison (Stampede vs Singleflight)
+
+For a focused comparison showing the core problem and solution:
+
+```bash
+./compare_stampede_vs_singleflight.sh
+```
+
+This generates a side-by-side comparison:
+- Shows the dramatic difference in downstream DB calls
+- Highlights p99 latency improvement
+- Explains the singleflight mechanism
+- Perfect for screenshots/demos
+
+#### Full Analysis (All Tests)
+
+After running tests, use the analyzer to get a comprehensive formatted comparison:
+
+```bash
+./analyze_results.sh
+```
+
+This generates:
+- **Detailed metrics table** with p50/p95/p99, req/sec, cache hits, DB calls, hit rate
+- **Color-coded observations** highlighting key findings
+- **Production recommendations** based on results
+- **File references** to individual test outputs
