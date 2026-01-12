@@ -646,3 +646,118 @@ This generates:
 - **Color-coded observations** highlighting key findings
 - **Production recommendations** based on results
 - **File references** to individual test outputs
+
+## Idempotency & Exactly-Once Patterns Demo
+
+A minimal, reproducible demo teaching **idempotency, deduplication, and practically-achievable "exactly-once" patterns** in distributed systems.
+
+### Architecture
+
+```
+Client → API (accepts command, assigns idempotency_key → writes to DB/outbox)
+       → Producer enqueues message (outbox)
+       → Worker consumes message
+       → performs side-effect (e.g., charge/write)
+       → marks outbox done
+```
+
+Three modes:
+- **naive**: Direct at-least-once delivery (shows duplicate problem)
+- **idempotent_key**: Deduplication via idempotency keys
+- **outbox**: Transactional outbox pattern for reliable delivery
+
+---
+
+### Demo 1: Naive Mode (At-Least-Once Duplicates)
+
+Shows why retries cause duplicate side-effects.
+
+```bash
+./run_naive.sh
+```
+
+**Expected Output:**
+```
+--- processed.log contents ---
+Worker processed charge 1 for $100 at 2026-01-11T...
+Worker processed charge 2 for $100 at 2026-01-11T...
+Worker processed charge 3 for $100 at 2026-01-11T...
+Worker processed charge 4 for $100 at 2026-01-11T...
+Worker processed charge 5 for $100 at 2026-01-11T...
+```
+
+**Observation**: 5 retries = 5 duplicate charges. At-least-once delivery without dedup causes duplicate side-effects.
+
+**Paste for Twitter thread:**
+```bash
+cat processed.log
+```
+
+---
+
+### Demo 2: Idempotency Key Deduplication
+
+Demonstrates idempotency keys preventing duplicate processing.
+
+```bash
+./run_idempotency_key.sh
+```
+
+**Expected Output:**
+```
+--- processed.log (should have 1 entry) ---
+Worker processed charge 1 for $100 at 2026-01-11T...
+
+--- Metrics (duplicate_detected should be 4) ---
+{
+    "requests_received": 5,
+    "requests_enqueued": 1,
+    "duplicate_detected": 4,
+    "outbox_entries": 0
+}
+```
+
+**Observation**: 5 requests with same idempotency key → only 1 processed, 4 duplicates detected and short-circuited.
+
+**Paste for Twitter thread:**
+```bash
+cat processed.log
+curl -s http://localhost:3000/metrics | grep duplicate_detected
+```
+
+---
+
+### Demo 3: Transactional Outbox Pattern
+
+Demonstrates outbox pattern ensuring no lost messages + exactly-once semantics even with worker crashes.
+
+```bash
+./run_outbox.sh
+```
+
+**Expected Output:**
+```
+--- processed.log (all 3 processed despite crash) ---
+Worker processed charge 1 for $100 at 2026-01-11T...
+Worker processed charge 2 for $100 at 2026-01-11T...
+Worker processed charge 3 for $100 at 2026-01-11T...
+
+--- Outbox status (should be 0 pending) ---
+0
+```
+
+**Observation**: Worker crashes after 2 messages, but outbox ensures all 3 get processed after restart. No duplicates due to idempotency check in worker.
+
+### Why This Works
+
+#### Idempotency Keys + Server Dedup
+
+Client-side idempotency keys combined with server-side deduplication is the practical way to achieve idempotent side-effects in distributed systems. The client generates a unique key per logical operation (not per retry). The server stores processed keys in a durable dedup store and checks on every request: if key exists, return cached result; if not, process and store. This prevents duplicate side-effects even when the same request is retried multiple times due to network failures or timeouts.
+
+#### Transactional Outbox Pattern
+
+The transactional outbox prevents lost messages in the presence of failures. Instead of enqueuing a message after committing a database transaction (which creates a window where the commit succeeds but the enqueue fails), we write both the business entity AND an outbox entry in the SAME database transaction. A separate outbox processor then reads pending outbox entries and reliably delivers them to workers. Because the outbox write is atomic with the business write, we guarantee that every committed business operation will eventually be delivered, achieving reliable at-least-once delivery without message loss.
+
+#### Limitations of Exactly-Once
+
+True exactly-once semantics across arbitrary side-effects is impossible in distributed systems without strong global coordination (which sacrifices availability). What we achieve here is "effectively-once" or "exactly-once processing" within practical SLOs: combining idempotent side-effects (checking if already processed) with at-least-once delivery guarantees (outbox pattern) gives us the same observable outcome as exactly-once, even if the underlying delivery mechanism retries. The key insight: idempotent operations + at-least-once delivery = exactly-once semantics for practical purposes.
