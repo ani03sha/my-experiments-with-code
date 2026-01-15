@@ -7,8 +7,34 @@ app.use(express.json());
 const tracer = new Tracer('service_c', 'http://localhost:9411');
 const port = 3002;
 
+// Simulate DB connection pool (limited concurrency creates queueing under load)
+const DB_POOL_SIZE = 10;
+let activeConnections = 0;
+const connectionQueue = [];
+
+function acquireConnection() {
+    return new Promise(resolve => {
+        if (activeConnections < DB_POOL_SIZE) {
+            activeConnections++;
+            resolve();
+        } else {
+            connectionQueue.push(resolve);
+        }
+    });
+}
+
+function releaseConnection() {
+    if (connectionQueue.length > 0) {
+        const next = connectionQueue.shift();
+        next();
+    } else {
+        activeConnections--;
+    }
+}
+
 let requestCount = 0;
 let activeRequests = 0;
+let queuedRequests = 0;
 const latencies = [];
 
 function recordLatency(start) {
@@ -32,10 +58,17 @@ app.post('/work', async (req, res) => {
     const start = Date.now();
     activeRequests++;
 
+    // Wait for DB connection from pool (creates queueing under high load)
+    const queueStart = Date.now();
+    queuedRequests = connectionQueue.length;
+    await acquireConnection();
+    const queueTime = Date.now() - queueStart;
+
     const parentContext = tracer.extractHeaders(req.headers);
     const span = tracer.startSpan('db_query', parentContext, {
         db_operation: 'SELECT',
-        db_table: 'users'
+        db_table: 'users',
+        queue_time_ms: queueTime
     });
 
     // Simulate DB work with variable latency
@@ -46,20 +79,26 @@ app.post('/work', async (req, res) => {
 
     await new Promise(resolve => setTimeout(resolve, dbTime));
 
-    await span.finish({ db_time_ms: dbTime, rows_returned: 42 });
+    releaseConnection();
+    span.finish({ db_time_ms: dbTime, queue_time_ms: queueTime, rows_returned: 42 });
 
     requestCount++;
     activeRequests--;
     recordLatency(start);
 
-    res.json({ status: 'ok', db_time: dbTime });
+    res.json({ status: 'ok', db_time: dbTime, queue_time: queueTime });
 });
 
 app.get('/metrics', (req, res) => {
     const percentiles = calculatePercentiles();
     res.json({
         request_count: requestCount,
-        active_request: activeRequests,
+        active_requests: activeRequests,
+        db_pool: {
+            size: DB_POOL_SIZE,
+            active_connections: activeConnections,
+            queued_requests: connectionQueue.length
+        },
         latencies: percentiles
     });
 });

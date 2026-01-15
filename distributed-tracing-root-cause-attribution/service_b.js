@@ -33,14 +33,9 @@ app.post('/work', async (req, res) => {
     const parentContext = tracer.extractHeaders(req.headers);
     const span = tracer.startSpan('process_business_logic', parentContext);
 
-    // Simulate CPU work
+    // Simulate CPU work (non-blocking to allow concurrency)
     const workTime = 10 + Math.random() * 30; // 10-40ms
-    const end = Date.now() + workTime;
-
-    while (Date.now() < end) {
-        // CPU bound work
-        Math.sqrt(Math.random() * 1000000);
-    }
+    await new Promise(resolve => setTimeout(resolve, workTime));
 
     // Call service C
     try {
@@ -51,14 +46,14 @@ app.post('/work', async (req, res) => {
             span
         );
     } catch (error) {
-        await span.finish({ error: error.message });
+        span.finish({ error: error.message });
         requestCount++;
         activeRequests--;
         recordLatency(start);
         return res.status(500).json({ error: 'Downstream failure' });
     }
 
-    await span.finish({ processing_time_ms: workTime });
+    span.finish({ processing_time_ms: workTime });
 
     requestCount++;
     activeRequests--;

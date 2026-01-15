@@ -55,13 +55,17 @@ class Tracer {
                 spanId,
                 sampled: sampled ? '1' : '0'
             },
-            finish: async (additionalTags = {}) => {
+            finish: (additionalTags = {}) => {
                 span.end_ts_iso = new Date().toISOString();
                 span.duration_ms = new Date(span.end_ts_iso) - new Date(span.start_ts_iso);
                 span.tags = { ...span.tags, ...additionalTags };
 
-                if (span.sampled) {
-                    await this.sendSpan(span);
+                // Head-tail sampling: always send slow spans even if not initially sampled
+                const shouldSend = span.sampled || (span.duration_ms > this.tailThreshold);
+
+                if (shouldSend) {
+                    // Fire-and-forget: don't block request on collector POST
+                    this.sendSpan(span).catch(() => {});
                 }
                 return span;
             }
@@ -103,17 +107,16 @@ class Tracer {
             ...this.propagateHeaders(childSpan.context)
         };
 
-        const start = Date.now();
         try {
             const response = await fetch(url, { ...options, headers });
-            await childSpan.finish({
+            childSpan.finish({
                 http_status: response.status,
                 http_method: options?.method || 'GET',
                 target_url: url
             });
             return response;
         } catch (error) {
-            await childSpan.finish({
+            childSpan.finish({
                 error: error.message,
                 http_method: options?.method || 'GET',
                 target_url: url
@@ -129,10 +132,10 @@ class Tracer {
         return async (...args) => {
             try {
                 const result = await originalCallback(...args);
-                await span.finish({ success: true });
+                span.finish({ success: true });
                 return result;
             } catch (error) {
-                await span.finish({ error: error.message, success: false });
+                span.finish({ error: error.message, success: false });
                 throw error;
             }
         };

@@ -23,8 +23,8 @@ sleep 2
 > traces.ndjson
 
 echo "Running high load test..."
-echo "Note: -c400 creates connection queueing which amplifies tail latency"
-wrk -t8 -c400 -d60s --latency http://localhost:3000/work > high_load.txt
+echo "Note: -c200 exceeds DB pool (10 connections), creating queueing and tail latency"
+wrk -t4 -c200 -d30s --latency http://localhost:3000/work > high_load.txt
 
 echo "High load results:"
 cat high_load.txt | grep -A 3 "Latency"

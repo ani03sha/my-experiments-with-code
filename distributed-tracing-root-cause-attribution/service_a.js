@@ -60,7 +60,7 @@ app.get('/work', async (req, res) => {
             span
         );
     } catch (error) {
-        await span.finish({ error: error.message });
+        span.finish({ error: error.message });
         requestCount++;
         activeRequests--;
         recordLatency(start);
@@ -79,12 +79,12 @@ app.get('/work', async (req, res) => {
 
     await externalCall();
 
-    // Optional: start worker thread with trace context
-    if (Math.random() < 0.3) {
+    // Optional: start worker thread with trace context (reduced to 5% - worker creation is expensive)
+    if (Math.random() < 0.05) {
         await createWorkerTask({ task: 'background' }, span.context);
     }
 
-    await span.finish();
+    span.finish();
 
     requestCount++;
     activeRequests--;
@@ -131,8 +131,8 @@ if (!isMainThread) {
     const span = tracer.startSpan('worker_background_task', parentContext);
 
     // Simulate background work
-    setTimeout(async () => {
-        await span.finish({ worker_result: 'processed' });
+    setTimeout(() => {
+        span.finish({ worker_result: 'processed' });
         parentPort.postMessage({ status: 'done' });
     }, 50);
 } else if (require.main === module) {

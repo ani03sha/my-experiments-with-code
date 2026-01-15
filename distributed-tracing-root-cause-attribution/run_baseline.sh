@@ -20,7 +20,8 @@ SERVICE_A_PID=$!
 sleep 2
 
 echo "Running baseline load test..."
-wrk -t4 -c200 -d20s --latency http://localhost:3000/work > baseline.txt
+echo "Using -c50 (50 connections) - within DB pool capacity"
+wrk -t2 -c50 -d20s --latency http://localhost:3000/work > baseline.txt
 
 echo "Baseline results:"
 cat baseline.txt | grep -A 3 "Latency"

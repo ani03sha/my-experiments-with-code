@@ -15,8 +15,8 @@ wrk -> service_A (API:3000) -> service_B (worker:3001) -> service_C (db_sim:3002
 | Service | Port | Role |
 |---------|------|------|
 | service_a.js | 3000 | API entrypoint, orchestrates calls to B and external APIs |
-| service_b.js | 3001 | Mid-tier business logic with CPU-bound work |
-| service_c.js | 3002 | Database simulation with variable latency |
+| service_b.js | 3001 | Mid-tier business logic with simulated processing time (10-40ms) |
+| service_c.js | 3002 | Database simulation with connection pool (10 connections), variable latency (5-55ms, 1% tail +200ms) |
 | trace_collector.js | 9411 | Collects and stores spans in NDJSON format |
 
 ## Prerequisites
@@ -115,17 +115,17 @@ Each span contains:
 
 ## wrk Commands
 
-**Baseline:**
+**Baseline (within capacity):**
 ```bash
-wrk -t4 -c200 -d20s --latency http://localhost:3000/work
+wrk -t2 -c50 -d20s --latency http://localhost:3000/work
 ```
 
 **High load (creates tail latency):**
 ```bash
-wrk -t8 -c400 -d60s --latency http://localhost:3000/work
+wrk -t4 -c200 -d30s --latency http://localhost:3000/work
 ```
 
-> **Why -c400 creates tails:** With 400 concurrent connections but limited downstream capacity, requests queue up. Connection queueing + variable DB latency compounds into significant p99 spikes.
+> **Why -c200 creates tails:** Service C simulates a DB connection pool with only 10 connections. With 200 concurrent requests competing for 10 DB connections, requests queue. Each queued request waits for others to complete (~30ms average), causing latency to compound. A request arriving when 50 others are queued waits ~1.5 seconds before even starting its DB work.
 
 ## Validation
 
