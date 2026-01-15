@@ -3,6 +3,7 @@
 Experiments to understand various concepts in detail.
 
 ## Downstream Saturation Safe Mitigation
+
 This is a hands-on demonstration of how queueing creates tail latency in distributed systems. Through a minimal API→DB setup, you'll learn:
 
 - Why p99 latency explodes under load (queueing, not slow code)
@@ -85,7 +86,7 @@ Only 2 concurrent requests → 98 wait in line
 - POOL_SIZE=10 (Matched Capacity):
 
 ```plaintext
-RPS: ~190, p99: ~520ms  
+RPS: ~190, p99: ~520ms
 API queue: ~90, DB queue: 0
 Max throughput reached, but queues still form
 ```
@@ -155,11 +156,13 @@ Effective QPS = Incoming QPS × (1 + Average Retries)
 ```
 
 If you have 100 req/s with 3 retries on 10% of requests:
+
 ```
 100 req/s × (1 + 0.3) = 130 req/s on downstream
 ```
 
 But with a retry storm, this becomes exponential:
+
 ```
 100 req/s × (1 + 16 retries) = 1700 req/s 🔥
 ```
@@ -179,6 +182,7 @@ Your users see timeouts while dashboards show "healthy".
 #### 1. Exponential Backoff
 
 Wait longer between retries:
+
 - 1st retry: 50ms
 - 2nd retry: 100ms
 - 3rd retry: 200ms
@@ -214,6 +218,7 @@ const RETRIES = 3; // Not 5, not 10, definitely not infinite
 #### Downstream Service (`downstream.js`)
 
 Simulates a realistic backend:
+
 - **Concurrency limit**: 10 max concurrent requests
 - **Fast path**: 50ms latency (95% of requests)
 - **Slow path**: 1000ms latency (5% of requests)
@@ -223,6 +228,7 @@ Simulates a realistic backend:
 #### API Server (`api_server.js`)
 
 Configurable retry behavior:
+
 - `RETRIES`: Max retry attempts
 - `TIMEOUT_MS`: Request timeout
 - `EXP_BACKOFF`: Enable exponential backoff
@@ -232,6 +238,7 @@ Configurable retry behavior:
 #### Load Testing
 
 Uses `wrk` to generate realistic load:
+
 - 2 threads
 - 10 concurrent connections
 - 10 second test duration per scenario
@@ -239,11 +246,13 @@ Uses `wrk` to generate realistic load:
 ### How to Run Individual Scenarios
 
 #### Baseline (No Retries)
+
 ```bash
 ./run_baseline.sh
 ```
 
 #### Naive Retries (3 retries, no backoff)
+
 ```bash
 RETRIES=3 TIMEOUT_MS=100 node api_server.js &
 node downstream.js &
@@ -251,6 +260,7 @@ wrk -t2 -c10 -d10s http://localhost:3000/api
 ```
 
 #### Retry Storm (5 retries, 50ms timeout)
+
 ```bash
 RETRIES=5 TIMEOUT_MS=50 node api_server.js &
 node downstream.js &
@@ -258,6 +268,7 @@ wrk -t2 -c10 -d10s http://localhost:3000/api
 ```
 
 #### Backoff + Jitter (Safe Retries)
+
 ```bash
 RETRIES=3 TIMEOUT_MS=100 EXP_BACKOFF=true JITTER=true node api_server.js &
 node downstream.js &
@@ -281,6 +292,7 @@ When you see the retry storm scenario:
 - **System thrashing** instead of serving requests
 
 Compare to backoff+jitter:
+
 - **238 retries** (85% reduction!)
 - **7 queue depth** (93% reduction!)
 - **System stable** and recovering
@@ -324,6 +336,7 @@ Run the combined demo (recommended):
 ```
 
 This will:
+
 1. Start dispatcher with 1 instance
 2. Start autoscaler
 3. Apply burst load
@@ -342,6 +355,7 @@ This will:
 **Expected Outcome**: Single instance overwhelmed, high p99 latency, queue depth spikes.
 
 **What to capture**:
+
 ```bash
 cat baseline_burst.txt | grep "Latency Distribution" -A 4
 # Copy: p50, p95, p99 values
@@ -358,6 +372,7 @@ cat baseline_burst.txt | grep "Requests/sec"
 **Expected Outcome**: Some requests shed (503), but successful requests maintain SLO.
 
 **What to capture**:
+
 ```bash
 cat after_noscale.json | jq '.api_instances[0] | {
   shed_count: .api_shed_count,
@@ -375,6 +390,7 @@ cat after_noscale.json | jq '.api_instances[0] | {
 **Expected Outcome**: Instance count increases, shed rate decreases, p95 recovers.
 
 **What to capture**:
+
 ```bash
 # Before
 cat before_combined.json | jq '{instances: .dispatcher.dispatcher_active_instances, p95: .dispatcher.p95_estimate}'
@@ -393,10 +409,12 @@ cat after_combined.json | jq '.autoscaler.scale_history'
 ```
 
 Tests different combinations of:
+
 - Scale reaction time (fast: 3s, slow: 10s)
 - Shed threshold (low: 5, medium: 10, high: 15)
 
 **What to capture**:
+
 ```bash
 cat sweep_results_*/summary.csv | column -t -s','
 ```
@@ -471,6 +489,7 @@ wrk -> dispatcher -> [ N x API instances ] -> db_sim
 - **Remediator**: Polls metrics and executes remediation actions based on SLO rules
 
 ### Quick Start
+
 ```bash
 # Run baseline test (20 seconds)
 ./run_baseline.sh
@@ -484,31 +503,41 @@ wrk -> dispatcher -> [ N x API instances ] -> db_sim
 ### Run Scripts
 
 #### run_baseline.sh
+
 Starts 2 API instances, dispatcher, and DB simulator. Runs baseline load test:
+
 ```bash
 wrk -t4 -c200 -d20s --latency http://localhost:8080/work
 ```
+
 Output saved to `baseline.txt`.
 
 #### run_chaos_latency.sh
+
 Injects 200ms latency on instance-1 after 10 seconds for 20 seconds. Remediator monitors and may restart/scale. Runs:
+
 ```bash
 wrk -t8 -c400 -d60s --latency http://localhost:8080/work
 ```
+
 Output saved to `during_latency.txt`.
 
 #### run_chaos_error.sh
+
 Injects 50% error rate on instance-1 after 10 seconds for 20 seconds. Remediator may enable degrade mode. Same wrk command, output to `during_error.txt`.
 
 #### run_chaos_kill.sh
+
 Kills instance-1 after 10 seconds. Remediator detects and should restart. Same wrk command, output to `during_kill.txt`.
 
 #### collect_metrics.sh
+
 Samples `/metrics` endpoints every 5 seconds and stores snapshots to files.
 
 ## Cache Stampede Demo
 
 A compact, deterministic, reproducible demonstration of cache behavior under load, specifically showing:
+
 - Cache misses
 - Cache stampedes
 - Mitigation strategies (singleflight / request coalescing, negative caching)
@@ -548,6 +577,7 @@ Downstream DB Simulator (port 3001, max 20 concurrent, 50ms latency)
 The cache is inside the API process (simple in-memory Map with TTL).
 
 **DB Simulator Configuration:**
+
 - Concurrency limit: 20 simultaneous requests (controlled by semaphore)
 - Latency per request: 50ms
 - This creates realistic backpressure to demonstrate cache benefits
@@ -570,6 +600,7 @@ The easiest way to see all demonstrations:
 ```
 
 This script:
+
 - Runs all 5 tests sequentially (no-cache, naive, stampede, singleflight, negative)
 - Collects and analyzes results automatically
 - Generates a comprehensive summary with:
@@ -586,35 +617,45 @@ This script:
 Each script demonstrates a different caching behavior:
 
 #### 1. No Cache Baseline
+
 ```bash
 ./run_no_cache.sh
 ```
+
 Expected: Stable but slow (p50: ~50-70ms, p99: ~100-150ms). All requests hit the database. Downstream load proportional to QPS.
 Note: Uses 100 concurrent connections to avoid overwhelming the uncached system.
 
 #### 2. Naive Cache
+
 ```bash
 ./run_naive_cache.sh
 ```
+
 Expected: Good steady-state performance when cache is hot, but catastrophic p99 spike when TTL expires and cache entries synchronize.
 
 #### 3. Cache Stampede (Intentional)
+
 ```bash
 ./run_stampede.sh
 ```
+
 Expected: Dramatic demonstration of stampede behavior. Sudden surge in `downstream_calls` and `db_queue`, p99 latency spikes.
 Duration: ~20 seconds (faster than before)
 
 #### 4. Singleflight Protection
+
 ```bash
 ./run_singleflight.sh
 ```
+
 Expected: `downstream_calls` capped at ~1 per key despite high concurrency. P99 stabilizes even during TTL expiry.
 
 #### 5. Negative Caching
+
 ```bash
 ./run_negative_cache.sh
 ```
+
 Expected: During error bursts, repeated failures don't amplify load. Short-TTL error caching prevents downstream from being hammered.
 
 ### Analyzing Test Results
@@ -628,6 +669,7 @@ For a focused comparison showing the core problem and solution:
 ```
 
 This generates a side-by-side comparison:
+
 - Shows the dramatic difference in downstream DB calls
 - Highlights p99 latency improvement
 - Explains the singleflight mechanism
@@ -642,6 +684,7 @@ After running tests, use the analyzer to get a comprehensive formatted compariso
 ```
 
 This generates:
+
 - **Detailed metrics table** with p50/p95/p99, req/sec, cache hits, DB calls, hit rate
 - **Color-coded observations** highlighting key findings
 - **Production recommendations** based on results
@@ -662,6 +705,7 @@ Client → API (accepts command, assigns idempotency_key → writes to DB/outbox
 ```
 
 Three modes:
+
 - **naive**: Direct at-least-once delivery (shows duplicate problem)
 - **idempotent_key**: Deduplication via idempotency keys
 - **outbox**: Transactional outbox pattern for reliable delivery
@@ -677,6 +721,7 @@ Shows why retries cause duplicate side-effects.
 ```
 
 **Expected Output:**
+
 ```
 --- processed.log contents ---
 Worker processed charge 1 for $100 at 2026-01-11T...
@@ -689,6 +734,7 @@ Worker processed charge 5 for $100 at 2026-01-11T...
 **Observation**: 5 retries = 5 duplicate charges. At-least-once delivery without dedup causes duplicate side-effects.
 
 **Paste for Twitter thread:**
+
 ```bash
 cat processed.log
 ```
@@ -704,6 +750,7 @@ Demonstrates idempotency keys preventing duplicate processing.
 ```
 
 **Expected Output:**
+
 ```
 --- processed.log (should have 1 entry) ---
 Worker processed charge 1 for $100 at 2026-01-11T...
@@ -720,6 +767,7 @@ Worker processed charge 1 for $100 at 2026-01-11T...
 **Observation**: 5 requests with same idempotency key → only 1 processed, 4 duplicates detected and short-circuited.
 
 **Paste for Twitter thread:**
+
 ```bash
 cat processed.log
 curl -s http://localhost:3000/metrics | grep duplicate_detected
@@ -736,6 +784,7 @@ Demonstrates outbox pattern ensuring no lost messages + exactly-once semantics e
 ```
 
 **Expected Output:**
+
 ```
 --- processed.log (all 3 processed despite crash) ---
 Worker processed charge 1 for $100 at 2026-01-11T...
@@ -761,3 +810,143 @@ The transactional outbox prevents lost messages in the presence of failures. Ins
 #### Limitations of Exactly-Once
 
 True exactly-once semantics across arbitrary side-effects is impossible in distributed systems without strong global coordination (which sacrifices availability). What we achieve here is "effectively-once" or "exactly-once processing" within practical SLOs: combining idempotent side-effects (checking if already processed) with at-least-once delivery guarantees (outbox pattern) gives us the same observable outcome as exactly-once, even if the underlying delivery mechanism retries. The key insight: idempotent operations + at-least-once delivery = exactly-once semantics for practical purposes.
+
+## Distributed Tracing & Root-Cause Attribution Demo
+
+A compact, deterministic demo that shows **distributed tracing, context propagation, sampling, and latency attribution** across a small multi-service stack.
+
+### Architecture
+
+```
+wrk -> service_A (API:3000) -> service_B (worker:3001) -> service_C (db_sim:3002)
+                           \-> external_call (simulated)
+       trace-collector (9411) <- spans (HTTP POST)
+```
+
+#### Services
+
+| Service            | Port | Role                                                                                                 |
+| ------------------ | ---- | ---------------------------------------------------------------------------------------------------- |
+| service_a.js       | 3000 | API entrypoint, orchestrates calls to B and external APIs                                            |
+| service_b.js       | 3001 | Mid-tier business logic with simulated processing time (10-40ms)                                     |
+| service_c.js       | 3002 | Database simulation with connection pool (10 connections), variable latency (5-55ms, 1% tail +200ms) |
+| trace_collector.js | 9411 | Collects and stores spans in NDJSON format                                                           |
+
+
+### Quick Start
+
+#### 1. Run Baseline Test
+
+```bash
+chmod +x *.sh
+./run_baseline.sh
+```
+
+This will:
+- Start the trace collector and all services
+- Run `wrk -t4 -c200 -d20s` baseline load test
+- Collect metrics and traces
+- Output results to `baseline.txt` and `traces_baseline.ndjson`
+
+#### 2. Run High Load Test
+
+```bash
+./run_high_load.sh
+```
+
+This will:
+- Run `wrk -t8 -c400 -d60s` to create tail latency
+- Generate trace summaries for slowest traces
+- Output to `high_load.txt`, `trace_summary.txt`, `traces_high_load.ndjson`
+
+#### 3. Demonstrate Sampling Strategies
+
+```bash
+./run_sampling.sh
+```
+
+Shows three sampling modes:
+- **No sampling (100%)**: All spans collected
+- **Probabilistic (10%)**: ~10% of traces sampled
+- **Head-tail**: 10% base + all slow traces (>100ms threshold)
+
+#### 4. View Trace Summaries
+
+```bash
+./trace_summary.sh traces.ndjson 5
+```
+
+Outputs waterfall views of the top 5 slowest traces.
+
+#### 5. Collect Metrics
+
+```bash
+./collect_metrics.sh
+```
+
+Fetches latency percentiles (p50/p95/p99) from all services.
+
+### Trace Headers
+
+Context propagation uses these HTTP headers:
+
+| Header | Purpose |
+|--------|---------|
+| `X-Trace-Id` | UUIDv4 trace identifier |
+| `X-Span-Id` | 16-char hex span identifier |
+| `X-Sampled` | `1` = sample, `0` = drop |
+
+### Span Model
+
+Each span contains:
+
+```json
+{
+  "trace_id": "uuid-v4",
+  "span_id": "hex16",
+  "parent_span_id": "hex16 or null",
+  "service": "service_a",
+  "operation": "handle_api_request",
+  "start_ts_iso": "2024-01-15T10:00:00.000Z",
+  "end_ts_iso": "2024-01-15T10:00:00.150Z",
+  "duration_ms": 150,
+  "tags": { "key": "value" },
+  "sampled": true
+}
+```
+
+### wrk Commands
+
+**Baseline (within capacity):**
+```bash
+wrk -t2 -c50 -d20s --latency http://localhost:3000/work
+```
+
+**High load (creates tail latency):**
+```bash
+wrk -t4 -c200 -d30s --latency http://localhost:3000/work
+```
+
+> **Why -c200 creates tails:** Service C simulates a DB connection pool with only 10 connections. With 200 concurrent requests competing for 10 DB connections, requests queue. Each queued request waits for others to complete (~30ms average), causing latency to compound. A request arriving when 50 others are queued waits ~1.5 seconds before even starting its DB work.
+
+### Validation
+
+#### 1. Trace Propagation
+For any trace, `trace_summary.sh` should show spans across all three services with correct parent-child relationships:
+
+```
+service_a.handle_api_request - 150ms
+  service_a.call_service_b - 80ms
+    service_b.process_business_logic - 75ms
+      service_b.call_service_c - 40ms
+        service_c.db_query - 35ms
+  service_a.call_external_api - 25ms
+```
+
+#### 2. Root Cause Attribution
+The **dominant span** in slow traces identifies the bottleneck (usually `service_c.db_query` during high load due to simulated DB tail latency).
+
+#### 3. Sampling Behavior
+- **100% sampling**: All traces captured (high volume)
+- **Probabilistic 10%**: ~10% of traces (may miss slow requests)
+- **Head-tail**: ~10% base + guaranteed slow traces (best for debugging)
